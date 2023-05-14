@@ -47,6 +47,10 @@ async fn main() {
     }
 }
 
+mod proto_messages {
+    include!(concat!(env!("OUT_DIR"), "/proto_messages.rs"));
+}
+
 async fn amzn_scraper(product: AmznProductInformation) -> () {
     todo!()
 }
