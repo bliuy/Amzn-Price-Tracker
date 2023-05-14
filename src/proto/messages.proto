@@ -6,3 +6,8 @@ message TestMessage {
     string content = 1;
 }
 
+message AmznScrapingRequest {
+    uint64 request_timestamp = 1;
+    repeated string product_codes = 2;
+}
+
