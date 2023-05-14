@@ -1,4 +1,5 @@
 use crate::structs::AmznProductInformation;
+use proto_messages::AmznScrapingRequest;
 use rumqttc::{AsyncClient, Client, Event, MqttOptions, Packet};
 
 mod functions;
@@ -22,28 +23,33 @@ async fn main() {
 
     // Polling the event loop
     loop {
-        if let Ok(incoming_mqtt_event) = mqtt_eventloop.poll().await {
-            if let Event::Incoming(packet) = incoming_mqtt_event {
+        if let Ok(incoming_event) = mqtt_eventloop.poll().await {
+            if let Event::Incoming(packet) = incoming_event {
                 if let Packet::Publish(publish) = packet {
-                    let payload_string = std::str::from_utf8(&publish.payload).unwrap();
-                    println!("{}", payload_string);
+                    match publish.topic.as_str() {
+                        "amzn_scraping_requests" => {
+                            let payload_bytes = publish.payload.as_ref();
+                            let decoded_request: AmznScrapingRequest = match prost::Message::decode(
+                                payload_bytes,
+                            ) {
+                                Ok(i) => i,
+                                Err(e) => {
+                                    println!("Unable to decode message received in the 'amzn_scraping_request' topic. See error raised: {}", e);
+                                    continue;
+                                }
+                            };
+                            println!("{:?}", decoded_request);
+                        }
+                        unknown_topic => {
+                            println!(
+                                "Event with unknown topic received. See event topic: {}",
+                                unknown_topic
+                            );
+                        }
+                    }
                 }
             }
-        };
-        // match mqtt_eventloop.poll().await {
-        // Ok(incoming_mqtt_event) => match incoming_mqtt_event {
-        //     rumqttc::Event::Incoming(packet) => match packet {
-        //         rumqttc::Packet::Publish(publish) => {
-        //             publish.
-        //         },
-        //         _ => {}
-        //     },
-        //     rumqttc::Event::Outgoing(packet) => {
-        //         println!("Outgoing: {:#?}", packet);
-        //     }
-        // },
-        // Err(_) => {}
-        // }
+        }
     }
 }
 
