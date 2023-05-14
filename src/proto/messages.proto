@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package proto_messages;
+
+message TestMessage {
+    string content = 1;
+}
+
