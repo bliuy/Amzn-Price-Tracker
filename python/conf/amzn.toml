@@ -1,0 +1,15 @@
+[products]
+asin = [
+    "0000",
+    "1111",
+    "2222",
+]
+
+[mqtt]
+topic = "scraping_amzn"
+client_id = "amzn_trigger"
+
+[logger]
+level = 10 # Corresponding to the DEBUG level
+format="%(asctime)s - %(message)s" # Formatting the logger output
+datefmt="%Y-%m-%dT%H:%M:%S" # Customizing the datetime format
