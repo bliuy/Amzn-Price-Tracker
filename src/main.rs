@@ -12,7 +12,7 @@ async fn main() {
     let mqtt_options: MqttOptions = MqttOptions::new("rust_price_scraper", "localhost", 1883); // Default options
     let (mqtt_client, mut mqtt_eventloop) = AsyncClient::new(mqtt_options, 100);
     match mqtt_client
-        .subscribe("price_scraper_topic", rumqttc::QoS::AtLeastOnce)
+        .subscribe("amzn_scraping_requests", rumqttc::QoS::AtLeastOnce)
         .await
     {
         Ok(_) => {}
