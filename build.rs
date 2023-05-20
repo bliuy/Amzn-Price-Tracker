@@ -1,4 +1,4 @@
-use std::{error::Error};
+use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let protos: Vec<&str> = vec![r#"src/proto/messages.proto"#];
