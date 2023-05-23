@@ -1,55 +1,110 @@
 use crate::structs::AmznProductInformation;
+use actix_web::{guard, web, App, HttpServer};
 use proto_messages::AmznScrapingRequest;
+use reqwest::ClientBuilder;
 use rumqttc::{AsyncClient, Client, Event, MqttOptions, Packet};
 
-mod functions;
+mod amzn;
 
-#[tokio::main]
+#[actix_web::main]
 async fn main() {
-    println!("Starting scraper service!");
+    println!("Scraper service starting");
 
-    // Spwaning a separate listener thread - Responsible for listening on the MQTT broker.
-    let mqtt_options: MqttOptions = MqttOptions::new("rust_price_scraper", "localhost", 1883); // Default options
-    let (mqtt_client, mut mqtt_eventloop) = AsyncClient::new(mqtt_options, 100);
-    match mqtt_client
-        .subscribe("amzn_scraping_requests", rumqttc::QoS::AtLeastOnce)
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            println!("{}", e);
-        }
+    // Constructing the reqwest Client - Used for scraping
+    static USER_AGENT: &str = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36";
+
+    // Spawning a new HttpServer
+    HttpServer::new(|| {
+        App::new()
+            .app_data(web::Data::new(
+                ClientBuilder::new().user_agent(USER_AGENT).build().unwrap(),
+            ))
+            .service(
+                web::resource("/hello_world")
+                    .route(web::route().guard(guard::Get()).to(services::hello_world)),
+            )
+            .service(
+                web::resource("/amzn_request")
+                    .route(web::route().guard(guard::Post()).to(services::amzn_request)),
+            )
+    })
+    .bind(("localhost", 8080))
+    .unwrap()
+    .run()
+    .await
+    .unwrap();
+}
+
+mod services {
+    use std::time::Duration;
+
+    use actix_web::{
+        rt::spawn,
+        web::{self, Bytes},
+        HttpRequest, HttpResponse, Responder, ResponseError, Result,
+    };
+    use futures::future;
+    use reqwest::Client;
+    use tokio::time::sleep;
+
+    use crate::{
+        amzn::{parse_response, scrape, successful_scrape, unsuccessful_scrape},
+        proto_messages::AmznScrapingRequest,
+        structs::AmznProductInformation,
     };
 
-    // Polling the event loop
-    loop {
-        if let Ok(incoming_event) = mqtt_eventloop.poll().await {
-            if let Event::Incoming(packet) = incoming_event {
-                if let Packet::Publish(publish) = packet {
-                    match publish.topic.as_str() {
-                        "amzn_scraping_requests" => {
-                            let payload_bytes = publish.payload.as_ref();
-                            let decoded_request: AmznScrapingRequest = match prost::Message::decode(
-                                payload_bytes,
-                            ) {
-                                Ok(i) => i,
-                                Err(e) => {
-                                    println!("Unable to decode message received in the 'amzn_scraping_request' topic. See error raised: {}", e);
-                                    continue;
-                                }
-                            };
-                            println!("{:?}", decoded_request);
+    pub async fn hello_world() -> impl Responder {
+        HttpResponse::Ok().body("Hello World!")
+    }
+
+    pub async fn amzn_request(
+        reqwest_client: web::Data<Client>,
+        request: HttpRequest,
+        request_payload: web::Bytes,
+    ) -> Result<String> {
+        let amzn_scraping_request: AmznScrapingRequest = prost::Message::decode(request_payload)
+            .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+
+        let futures = amzn_scraping_request
+            .product_codes
+            .into_iter()
+            .map(|asin| {
+                let client = reqwest_client.get_ref().clone();
+                spawn(async move {
+                    match scrape(&client, &asin, None).await {
+                        Ok(res) => match parse_response(res).await {
+                            Ok(result) => {
+                                successful_scrape(&result).await;
+                                return 1;
+                            }
+                            Err(e) => {
+                                unsuccessful_scrape(&e.to_string()).await;
+                                return 0;
+                            }
+                        },
+                        Err(e) => {
+                            unsuccessful_scrape(&e.to_string()).await;
+                            return 0;
                         }
-                        unknown_topic => {
-                            println!(
-                                "Event with unknown topic received. See event topic: {}",
-                                unknown_topic
-                            );
-                        }
-                    }
-                }
-            }
-        }
+                    };
+                })
+            })
+            .collect::<Vec<_>>();
+
+        match future::join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<u32>, _>>()
+        {
+            Ok(i) => {
+                let successful: u32 = i.iter().sum();
+                let total = i.len();
+                return Ok(format!("Status: {}/{} requests were successfully scraped.", successful, total))
+            },
+            Err(e) => {
+                return Err(actix_web::error::ErrorBadRequest(e))
+            },
+        };
     }
 }
 
@@ -61,9 +116,4 @@ async fn amzn_scraper(product: AmznProductInformation) -> () {
     todo!()
 }
 
-mod structs {
-
-    pub struct AmznProductInformation {
-        asin: String,
-    }
-}
+mod structs;
